@@ -1,6 +1,7 @@
 # Changelog
 
-## 2.0.0
+## 2.0.1
+
 
 ### Breaking Changes
 - Now requires `init()` before using any component
