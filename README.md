@@ -3,13 +3,22 @@
 [![pub package](https://img.shields.io/pub/v/offline_secure_session.svg)](https://pub.dev/packages/offline_secure_session)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**Zero-dependency** Dart library for secure session management with offline support.
+**Enterprise-grade** Dart library for secure session management with AES-256 encryption and offline support.
 
-Libreria Dart **sin dependencias** para manejo seguro de sesiones con soporte offline.
+Libreria Dart **nivel empresarial** para manejo seguro de sesiones con cifrado AES-256 y soporte offline.
 
 ---
 
 ## Features / Caracteristicas
+
+| Feature | Description / Descripcion |
+|---------|---------------------------|
+| AES-256 Encryption | Real encryption with random IV / Cifrado real con IV aleatorio |
+| GZIP Compression | Optimized storage / Almacenamiento optimizado |
+| Thread-Safe | Lock mechanism for concurrent access / Mecanismo de bloqueo para acceso concurrente |
+| Metrics | Operation tracking and performance stats / Seguimiento de operaciones y estadisticas |
+| Logger Hook | Enterprise monitoring integration / Integracion con monitoreo empresarial |
+| Retry with Backoff | Exponential backoff (1s, 2s, 4s... max 30s) / Reintento exponencial |
 
 | Class | Purpose / Proposito |
 |-------|---------------------|
@@ -24,7 +33,7 @@ Libreria Dart **sin dependencias** para manejo seguro de sesiones con soporte of
 
 ```yaml
 dependencies:
-  offline_secure_session: ^1.0.0
+  offline_secure_session: ^2.0.0
 ```
 
 ```bash
@@ -39,24 +48,59 @@ dart pub get
 import 'package:offline_secure_session/offline_secure_session.dart';
 
 void main() async {
-  final session = SecureSession();
-  final cache = OfflineCache();
-  final queue = OfflineQueue();
-  final sync = OfflineSync();
+  OfflineSecureSession.init(
+    path: '/path/to/storage',
+    encryptionKey: 'my_secret_key_32_chars_long_xxx',
+    maxQueueSize: 10000,
+  );
 
-  await session.set('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...');
-  final token = await session.get();
+  await OfflineSecureSession.session.set('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...');
+  final token = await OfflineSecureSession.session.get();
 
-  await cache.set('user', {'id': 1, 'name': 'John'});
-  final user = await cache.get<Map>('user');
+  await OfflineSecureSession.cache.set('user', {'id': 1, 'name': 'John'});
+  final user = await OfflineSecureSession.cache.get<Map>('user');
 
-  await queue.add({'method': 'POST', 'url': '/api/orders', 'body': {'product': 'A1'}});
+  await OfflineSecureSession.queue.add({'method': 'POST', 'url': '/api/orders', 'body': {'product': 'A1'}});
 
-  sync.onOnline = () => sync.process((action) async {
-    return true;
-  });
+  final sync = OfflineSecureSession.sync(maxRetries: 5, timeout: Duration(seconds: 2));
+  sync.onOnline = () => sync.process((action) async => true);
   sync.startMonitor();
 }
+```
+
+---
+
+## Enterprise Features / Funcionalidades Empresariales
+
+### Logger Integration / Integracion de Logger
+
+```dart
+OfflineSecureSession.setLogger((level, message, data) {
+  print('[$level] $message ${data ?? ''}');
+});
+```
+
+### Metrics / Metricas
+
+```dart
+final metrics = OfflineSecureSession.metrics;
+print('Operations: ${metrics['ops']}');
+print('Errors: ${metrics['errors']}');
+print('Queue size: ${metrics['queue']}');
+print('Avg response: ${metrics['avg_ms']}ms');
+```
+
+### Custom Sync Configuration / Configuracion de Sync Personalizada
+
+```dart
+final sync = OfflineSecureSession.sync(
+  host: 'your-api.com',
+  maxRetries: 5,
+  timeout: Duration(seconds: 2),
+);
+
+sync.onSuccess = (action) => print('Synced: $action');
+sync.onError = (action, error) => print('Failed: $action - $error');
 ```
 
 ---
@@ -67,24 +111,27 @@ void main() async {
 
 ```dart
 class OrderService {
-  final session = SecureSession();
-  final queue = OfflineQueue();
-  final sync = OfflineSync();
-
   OrderService() {
+    OfflineSecureSession.init(
+      path: '/data/app',
+      encryptionKey: 'your_32_char_encryption_key_here',
+    );
+
+    final sync = OfflineSecureSession.sync();
     sync.onOnline = _syncOrders;
     sync.startMonitor();
   }
 
   Future<void> placeOrder(Map<String, dynamic> order) async {
-    await queue.add({
+    await OfflineSecureSession.queue.add({
       'url': 'https://api.mystore.com/orders',
       'body': order,
-      'token': await session.get(),
+      'token': await OfflineSecureSession.session.get(),
     });
   }
 
   Future<void> _syncOrders() async {
+    final sync = OfflineSecureSession.sync();
     await sync.process((action) async {
       try {
         final response = await http.post(
@@ -105,22 +152,19 @@ class OrderService {
 
 ```dart
 class AuthService {
-  final session = SecureSession();
-  final cache = OfflineCache();
-
   Future<void> login(String email, String password) async {
     final response = await http.post(...);
     final data = jsonDecode(response.body);
 
-    await session.set(data['token'], exp: Duration(hours: 8));
-    await cache.set('profile', data['user']);
+    await OfflineSecureSession.session.set(data['token'], exp: Duration(hours: 8));
+    await OfflineSecureSession.cache.set('profile', data['user']);
   }
 
-  Future<bool> get isLoggedIn async => await session.get() != null;
+  Future<bool> get isLoggedIn async => await OfflineSecureSession.session.get() != null;
 
   Future<void> logout() async {
-    await session.clear();
-    await cache.remove('profile');
+    await OfflineSecureSession.session.clear();
+    await OfflineSecureSession.cache.remove('profile');
   }
 }
 ```
@@ -128,6 +172,19 @@ class AuthService {
 ---
 
 ## API Reference / Referencia API
+
+### OfflineSecureSession
+
+| Method | Description / Descripcion |
+|--------|---------------------------|
+| `init(path, encryptionKey, maxQueueSize)` | Initialize library / Inicializar libreria |
+| `session` | Access SecureSession / Acceder a SecureSession |
+| `cache` | Access OfflineCache / Acceder a OfflineCache |
+| `queue` | Access OfflineQueue / Acceder a OfflineQueue |
+| `sync(...)` | Create OfflineSync instance / Crear instancia de OfflineSync |
+| `metrics` | Get operation metrics / Obtener metricas |
+| `setLogger(handler)` | Set logger callback / Establecer callback de logger |
+| `reset()` | Clear all data / Limpiar todos los datos |
 
 ### SecureSession
 
@@ -149,7 +206,7 @@ class AuthService {
 
 | Method | Description / Descripcion |
 |--------|---------------------------|
-| `add(action)` | Queue action / Encolar accion |
+| `add(action)` | Queue action (returns false if full) / Encolar accion (false si llena) |
 | `pending` | Get pending list / Obtener lista pendiente |
 | `clear()` | Clear queue / Limpiar cola |
 
@@ -158,31 +215,45 @@ class AuthService {
 | Method | Description / Descripcion |
 |--------|---------------------------|
 | `onOnline` | Reconnection callback / Callback de reconexion |
-| `startMonitor()` | Start connectivity monitor / Iniciar monitor de conectividad |
+| `onSuccess` | Success callback / Callback de exito |
+| `onError` | Error callback / Callback de error |
+| `startMonitor()` | Start connectivity monitor / Iniciar monitor |
 | `stopMonitor()` | Stop monitor / Detener monitor |
-| `process(handler)` | Process queue (2s timeout per action) / Procesar cola (2s timeout por accion) |
-| `reset()` | Reset all stored data / Reiniciar todos los datos |
+| `process(handler)` | Process queue with timeout / Procesar cola con timeout |
 
 ---
 
 ## Architecture / Arquitectura
 
 ```
-                      _Store (internal)
-                  Shared persistence layer
-                            |
-        +-------------------+-------------------+
-        |         |         |                   |
-  SecureSession  OfflineCache  OfflineQueue  OfflineSync
-    Token+Exp     Key/Value     Actions       Process
+OfflineSecureSession.init()
+          |
+    _Crypto (AES-256 + GZIP)
+          |
+    _Store (Thread-safe persistence)
+          |
+    +-----+-----+-----+-----+
+    |     |     |     |     |
+Session Cache Queue  Sync  Metrics
 ```
 
+---
+
+## Security / Seguridad
+
+- AES-256 encryption with random IV per operation
+- SHA-256 key derivation
+- GZIP compression before encryption
+- Separate encrypted files for session, cache, and queue
+- Thread-safe operations with lock mechanism
+
+---
 
 ## Compatibility / Compatibilidad
 
 | Dart SDK | Status |
 |----------|--------|
-| >= 2.12.0 | Supported |
+| >= 2.17.0 | Supported |
 | < 4.0.0 | Supported |
 
 ---

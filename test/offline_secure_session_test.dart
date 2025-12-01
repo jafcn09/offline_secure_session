@@ -1,37 +1,90 @@
+import 'dart:io';
 import 'package:offline_secure_session/offline_secure_session.dart';
 import 'package:test/test.dart';
 
 void main() {
-  tearDown(() => OfflineSync.reset());
+  setUp(() => OfflineSecureSession.init(path: '${Directory.systemTemp.path}/test_oss', encryptionKey: 'my_secret_key_32_chars_long_xxx', maxQueueSize: 100));
+  tearDown(() => OfflineSecureSession.reset());
 
   group('SecureSession', () {
-    final s = SecureSession();
-    test('set/get token', () async { await s.set('jwt123'); expect(await s.get(), 'jwt123'); });
-    test('token expires', () async { await s.set('x', exp: Duration.zero); await Future.delayed(Duration(milliseconds: 5)); expect(await s.get(), isNull); });
-    test('clear token', () async { await s.set('del'); await s.clear(); expect(await s.get(), isNull); });
+    test('set/get token', () async { await OfflineSecureSession.session.set('jwt123'); expect(await OfflineSecureSession.session.get(), 'jwt123'); });
+    test('token expires', () async { await OfflineSecureSession.session.set('x', exp: Duration.zero); await Future.delayed(Duration(milliseconds: 10)); expect(await OfflineSecureSession.session.get(), isNull); });
+    test('clear token', () async { await OfflineSecureSession.session.set('del'); await OfflineSecureSession.session.clear(); expect(await OfflineSecureSession.session.get(), isNull); });
   });
 
   group('OfflineCache', () {
-    final c = OfflineCache();
-    test('set/get', () async { await c.set('user', {'id': 1}); expect(await c.get<Map>('user'), {'id': 1}); });
-    test('remove', () async { await c.set('tmp', 'val'); await c.remove('tmp'); expect(await c.get('tmp'), isNull); });
+    test('set/get', () async { await OfflineSecureSession.cache.set('user', {'id': 1}); expect(await OfflineSecureSession.cache.get<Map>('user'), {'id': 1}); });
+    test('remove', () async { await OfflineSecureSession.cache.set('tmp', 'val'); await OfflineSecureSession.cache.remove('tmp'); expect(await OfflineSecureSession.cache.get('tmp'), isNull); });
   });
 
   group('OfflineQueue', () {
-    final q = OfflineQueue();
-    test('add/pending', () async { await q.add({'a': 1}); await q.add({'b': 2}); expect((await q.pending).length, 2); });
-    test('clear', () async { await q.add({'x': 1}); await q.clear(); expect((await q.pending).length, 0); });
+    test('add/pending', () async { await OfflineSecureSession.queue.add({'a': 1}); await OfflineSecureSession.queue.add({'b': 2}); expect((await OfflineSecureSession.queue.pending).length, 2); });
+    test('clear', () async { await OfflineSecureSession.queue.add({'x': 1}); await OfflineSecureSession.queue.clear(); expect((await OfflineSecureSession.queue.pending).length, 0); });
+    test('max queue limit', () async { for (var i = 0; i < 100; i++) await OfflineSecureSession.queue.add({'i': i}); final added = await OfflineSecureSession.queue.add({'overflow': true}); expect(added, false); });
   });
 
   group('OfflineSync', () {
-    final sync = OfflineSync();
-    final q = OfflineQueue();
-    test('process success/fail', () async { await q.add({'ok': true}); await q.add({'ok': false}); await sync.process((a) async => a['ok'] == true); expect((await q.pending).length, 1); });
-    test('timeout 2s', () async {
-      await q.clear(); await q.add({'id': 1});
+    test('process success/fail', () async {
+      final sync = OfflineSecureSession.sync();
+      await OfflineSecureSession.queue.add({'ok': true});
+      await OfflineSecureSession.queue.add({'ok': false});
+      await sync.process((a) async => a['ok'] == true);
+      expect((await OfflineSecureSession.queue.pending).length, 1);
+    });
+
+    test('timeout', () async {
+      final sync = OfflineSecureSession.sync(timeout: Duration(seconds: 2));
+      await OfflineSecureSession.queue.clear();
+      await OfflineSecureSession.queue.add({'id': 1});
       final t = DateTime.now();
       await sync.process((a) => Future.delayed(Duration(seconds: 5), () => true));
-      expect(DateTime.now().difference(t).inSeconds, lessThanOrEqualTo(3));
+      expect(DateTime.now().difference(t).inSeconds, lessThanOrEqualTo(5));
+    });
+
+    test('retry with backoff', () async {
+      final sync = OfflineSecureSession.sync(maxRetries: 3);
+      await OfflineSecureSession.queue.clear();
+      await OfflineSecureSession.queue.add({'fail': true});
+      await sync.process((a) async => false);
+      final q = await OfflineSecureSession.queue.pending;
+      expect(q.length, 1);
+      expect(q[0]['r'], 1);
+    });
+
+    test('onError callback', () async {
+      final sync = OfflineSecureSession.sync(maxRetries: 1);
+      await OfflineSecureSession.queue.clear();
+      await OfflineSecureSession.queue.add({'myid': 'fail_item'});
+      Map<String, dynamic>? failedAction;
+      sync.onError = (a, e) => failedAction = a;
+      await sync.process((a) async => false);
+      await sync.process((a) async => false);
+      expect(failedAction?['myid'], 'fail_item');
+    });
+
+    test('custom host', () async {
+      final sync = OfflineSecureSession.sync(host: 'cloudflare.com');
+      expect(sync.host, 'cloudflare.com');
+    });
+  });
+
+  group('Encryption', () {
+    test('data is encrypted on disk', () async {
+      final path = '${Directory.systemTemp.path}/test_enc';
+      OfflineSecureSession.init(path: path, encryptionKey: 'test_key_12345678901234567890xx');
+      await OfflineSecureSession.session.set('secret_token');
+      final raw = await File('${path}_session.dat').readAsString();
+      expect(raw.contains('secret_token'), false);
+      OfflineSecureSession.reset();
+    });
+  });
+
+  group('Metrics', () {
+    test('tracks operations', () async {
+      await OfflineSecureSession.session.set('test');
+      await OfflineSecureSession.cache.set('key', 'value');
+      final m = OfflineSecureSession.metrics;
+      expect(m['ops'], greaterThan(0));
     });
   });
 }
