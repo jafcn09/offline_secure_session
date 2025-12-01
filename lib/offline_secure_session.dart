@@ -1,3 +1,5 @@
+library offline_secure_session;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
